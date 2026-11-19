@@ -1,5 +1,5 @@
 // Einfacher Offline-Cache für die App-Dateien. Produktabfragen gehen immer ins Netz.
-const CACHE = "kuehlschrank-v8";
+const CACHE = "kuehlschrank-v9";
 const FILES = ["./", "index.html", "style.css", "app.js", "recipes.js", "sync.js", "config.js", "manifest.webmanifest", "icon.svg"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener("activate", (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k))))); self.clients.claim(); });
@@ -7,5 +7,5 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== location.origin) return;
   // Netz zuerst, damit Updates sofort ankommen; ohne Netz aus dem Cache.
-  e.respondWith(fetch(e.request).then((r) => { const copy = r.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); return r; }).catch(() => caches.match(e.request)));
+  e.respondWith(fetch(e.request.url, { cache: "no-cache" }).then((r) => { const copy = r.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); return r; }).catch(() => caches.match(e.request)));
 });
