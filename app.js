@@ -7,7 +7,7 @@ const PLACES = ["Kühlschrank", "Tiefkühler", "Vorrat"];
 const CATS = {
   "Gemüse": { d: 7, c: "#3f9a4a" }, "Obst": { d: 10, c: "#e0862b" }, "Milchprodukte": { d: 7, c: "#4d8fd6" },
   "Fleisch & Fisch": { d: 3, c: "#c9473d" }, "Eier": { d: 21, c: "#d9b13b" }, "Brot & Backwaren": { d: 4, c: "#a5774a" },
-  "Tiefkühl": { d: 90, c: "#5bb7c9" }, "Trockenware": { d: 180, c: "#8a7f6e" }, "Getränke": { d: 30, c: "#7a6bd1" },
+  "Tiefkühl": { d: 365, c: "#5bb7c9" }, "Trockenware": { d: 180, c: "#8a7f6e" }, "Getränke": { d: 30, c: "#7a6bd1" },
   "Sonstiges": { d: 14, c: "#8a979c" },
 };
 const QUICK = [["Äpfel","Obst","Vorrat",14],["Bananen","Obst","Vorrat",6],["Tomaten","Gemüse","Kühlschrank",7],["Gurke","Gemüse","Kühlschrank",7],["Paprika","Gemüse","Kühlschrank",8],["Zwiebeln","Gemüse","Vorrat",30],["Kartoffeln","Gemüse","Vorrat",21],["Möhren","Gemüse","Kühlschrank",14],["Salat","Gemüse","Kühlschrank",4],["Zitrone","Obst","Kühlschrank",21],["Brot","Brot & Backwaren","Vorrat",4],["Eier","Eier","Kühlschrank",21]];
@@ -234,11 +234,11 @@ function mapCategory(tags, text = "") {
 function moveItem(r, to) {
   if (!to || to === r.place) return;
   const patch = { place: to };
-  if (to === "Tiefkühler") { patch.cat = "Tiefkühl"; const e = plus(180); if (!r.exp || r.exp < e) patch.exp = e; patch.expSource = "geschätzt"; }
+  if (to === "Tiefkühler") { patch.cat = "Tiefkühl"; const e = plus(365); if (!r.exp || r.exp < e) patch.exp = e; patch.expSource = "geschätzt"; }
   if (r.place === "Tiefkühler" && to !== "Tiefkühler") { patch.exp = plus(r.cat === "Fleisch & Fisch" || /h[äa]hnchen|fisch|fleisch|hack/i.test(r.name) ? 1 : 2); patch.opened = today(); }
   store.update(r.id, patch);
-  learn(r, to === "Tiefkühler" ? { place: to, cat: "Tiefkühl", days: 180, learned: true } : { place: to, learned: true });
-  toast(to === "Tiefkühler" ? `${r.name}: in den Tiefkühler, haltbar ca. 6 Monate` : r.place === "Tiefkühler" ? `${r.name}: aufgetaut, bald verbrauchen` : `${r.name}: jetzt im ${to === "Vorrat" ? "Vorrat" : to}`);
+  learn(r, to === "Tiefkühler" ? { place: to, cat: "Tiefkühl", days: 365, learned: true } : { place: to, learned: true });
+  toast(to === "Tiefkühler" ? `${r.name}: in den Tiefkühler, haltbar ca. 1 Jahr` : r.place === "Tiefkühler" ? `${r.name}: aufgetaut, bald verbrauchen` : `${r.name}: jetzt im ${to === "Vorrat" ? "Vorrat" : to}`);
 }
 function parseQuantity(p) {
   const s = String(p.quantity || "").toLowerCase();
@@ -335,7 +335,7 @@ const SHELF = [
 ];
 function estimateDays(name, tags, cat) {
   const hay = (String(name) + " " + (tags || []).join(" ")).toLowerCase().replace(/en:|de:/g, "");
-  if (cat === "Tiefkühl") return 180;
+  if (cat === "Tiefkühl") return 365;
   for (const [re, d] of SHELF) if (re.test(hay)) return d;
   return CATS[cat] ? CATS[cat].d : 14;
 }
@@ -375,7 +375,10 @@ const SHOPS = ["Egal", "Aldi", "Lidl", "Rewe", "Edeka", "Kaufland", "Netto", "Pe
 const LKEY = "kuehlschrank-list-v1", SKEY = "kuehlschrank-shops-v1", DKEY = "kuehlschrank-dismissed-v1";
 let shopList = load(LKEY, []);
 let shopOf = load(SKEY, {});       // Produktname (klein) -> Laden
-let dismissed = load(DKEY, {});    // Produktname (klein) -> Datum, bis wann ausgeblendet
+let dismissed = load(DKEY, {});
+const NKEY = "kuehlschrank-never-v1";
+let never = load(NKEY, {});      // Grundvorrat-Artikel, die ihr nie vorgeschlagen bekommen wollt
+const BASICS = ["Milch", "Eier", "Butter", "Brot", "Käse", "Joghurt", "Nudeln", "Reis", "Kartoffeln", "Zwiebeln", "Tomaten", "Äpfel"];    // Produktname (klein) -> Datum, bis wann ausgeblendet
 const key = (n) => String(n).trim().toLowerCase();
 const daysBetween = (a, b) => Math.round((new Date(b + "T12:00") - new Date(a + "T12:00")) / 864e5);
 const median = (a) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
@@ -411,6 +414,13 @@ function suggestions() {
     }
     if (reason) out.push({ name, reason, prio, qty: usual, unit: last.unit });
   }
+  // Grundvorrat: sofort Vorschläge, auch ohne Lernhistorie
+  for (const b of BASICS) {
+    const k = key(b);
+    if (never[k] || (dismissed[k] && dismissed[k] >= today()) || onList(b)) continue;
+    const has = active().some((r) => key(r.name).includes(k)) || out.some((o) => key(o.name).includes(k));
+    if (!has) out.push({ name: b, reason: "gehört zum Grundvorrat, gerade keiner da", prio: 0, qty: 1, unit: "Stk", basic: true });
+  }
   return out.sort((a, b) => b.prio - a.prio || a.name.localeCompare(b.name));
 }
 
@@ -423,9 +433,9 @@ function addToList(name, qty, unit) {
 function renderShop() {
   if (!$("#v-shop")) return;
   const sug = suggestions();
-  $("#sugCount").textContent = sug.length ? String(sug.length) : "";
+  const urgent = sug.filter((x) => !x.basic).length; $("#sugCount").textContent = urgent ? String(urgent) : "";
   $("#suggest").innerHTML = sug.length
-    ? '<div class="list">' + sug.map((s) => `<div class="item"><span class="dot" style="background:var(${s.prio === 3 ? "--red" : s.prio === 2 ? "--amber" : "--accent"})"></span><span class="name">${esc(s.name)}</span><span class="pill p-muted">${fmtQty(s)}</span><span class="meta">${esc(s.reason)}</span><div class="acts"><button class="act" data-s="add" data-n="${esc(s.name)}" data-q="${s.qty}" data-u="${s.unit}">Auf die Liste</button><button class="act" data-s="hide" data-n="${esc(s.name)}">Diese Woche nicht</button></div></div>`).join("") + "</div>"
+    ? '<div class="list">' + sug.map((s) => `<div class="item"><span class="dot" style="background:var(${s.prio === 3 ? "--red" : s.prio === 2 ? "--amber" : "--accent"})"></span><span class="name">${esc(s.name)}</span><span class="pill p-muted">${fmtQty(s)}</span><span class="meta">${esc(s.reason)}</span><div class="acts"><button class="act" data-s="add" data-n="${esc(s.name)}" data-q="${s.qty}" data-u="${s.unit}">Auf die Liste</button><button class="act" data-s="hide" data-n="${esc(s.name)}">Diese Woche nicht</button>${s.basic ? `<button class="act" data-s="never" data-n="${esc(s.name)}">Brauchen wir nicht</button>` : ""}</div></div>`).join("") + "</div>"
     : `<div class="empty"><p>Gerade nichts nachzukaufen. Vorschläge erscheinen, wenn etwas leer wird oder knapp ist, und wenn die App merkt, wie oft ihr etwas kauft.</p></div>`;
   const open = shopList.filter((l) => !l.done), done = shopList.filter((l) => l.done);
   const byShop = {};
@@ -444,6 +454,7 @@ document.addEventListener("click", (e) => {
   const s = e.target.closest("[data-s]");
   if (s) {
     if (s.dataset.s === "add") addToList(s.dataset.n, Number(s.dataset.q), s.dataset.u);
+    if (s.dataset.s === "never") { never[key(s.dataset.n)] = true; save(NKEY, never); renderShop(); }
     if (s.dataset.s === "hide") { dismissed[key(s.dataset.n)] = plus(7); save(DKEY, dismissed); renderShop(); }
     return;
   }
@@ -465,5 +476,19 @@ $("#listAdd").addEventListener("submit", (e) => {
 });
 
 /* ---------- Start ---------- */
+// Einmalige Korrektur für Einträge aus Version 0.2: Tiefkühlware mit zu kurzer Haltbarkeit
+(function fixFrozen() {
+  let changed = false;
+  for (const r of items) {
+    if (r.status !== "aktiv" || r.expSource === "eingetragen") continue;
+    const frozen = r.place === "Tiefkühler" || r.cat === "Tiefkühl" || isFrozen([], r.name);
+    if (!frozen) continue;
+    const want = plus(365, r.added || today());
+    if (r.place !== "Tiefkühler") { r.place = "Tiefkühler"; changed = true; }
+    if (r.cat !== "Tiefkühl") { r.cat = "Tiefkühl"; changed = true; }
+    if (!r.exp || r.exp < want) { r.exp = want; changed = true; }
+  }
+  if (changed) save(KEY, items);
+})();
 render();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
