@@ -72,6 +72,7 @@ function render() {
   const used = items.filter((r) => r.status === "aufgebraucht" && (r.done || "").startsWith(m)).length;
   $("#stats").textContent = `Diesen Monat: ${used} aufgebraucht, ${wasted} weggeworfen.`;
   renderShop();
+  renderCook();
 }
 function takePanel(r) {
   const u = r.unit; const pre = (u === "Stk" ? [1, 2, 3] : u === "Pck" ? [0.25, 0.5] : [25, 50, 100]).filter((v) => v < Number(r.qty));
@@ -117,7 +118,7 @@ document.addEventListener("change", (e) => {
 });
 document.querySelectorAll("nav button").forEach((b) => b.onclick = () => {
   document.querySelectorAll("nav button").forEach((x) => x.removeAttribute("aria-current")); b.setAttribute("aria-current", "page");
-  ["bestand", "scan", "shop", "add"].forEach((v) => $("#v-" + v).hidden = v !== b.dataset.view);
+  ["bestand", "scan", "cook", "shop", "add"].forEach((v) => $("#v-" + v).hidden = v !== b.dataset.view);
   if (b.dataset.view !== "scan") stopScan();
   window.scrollTo(0, 0);
 });
@@ -473,6 +474,48 @@ $("#listAdd").addEventListener("submit", (e) => {
   if (m) addToList(m[3], parseFloat(m[1].replace(",", ".")), ({ g: "g", ml: "ml", stk: "Stk", pck: "Pck" })[String(m[2] || "stk").toLowerCase()]);
   else addToList(v, 1, "Stk");
   $("#listInput").value = "";
+});
+
+/* ---------- Rezepte aus dem Vorrat ---------- */
+function ingParse(z) { const opt = z.startsWith("?"); const [label, ...kw] = (opt ? z.slice(1) : z).split("|"); return { label, opt, re: new RegExp(kw.join("|"), "i") }; }
+const PARSED = (typeof RECIPES !== "undefined" ? RECIPES : []).map((r) => ({ ...r, ing: r.z.map(ingParse) }));
+function urgencyWeight(d) { return d === null ? 1 : d <= 1 ? 6 : d <= 3 ? 4 : d <= 7 ? 2 : 1; }
+function matchRecipes() {
+  const act = active().filter((r) => !r.unknown);
+  const res = [];
+  for (const r of PARSED) {
+    const have = [], missing = []; let score = 0, used = 0;
+    for (const g of r.ing) {
+      const hits = act.filter((i) => g.re.test(i.name)).sort((a, b) => (effExp(a) || "9999").localeCompare(effExp(b) || "9999"));
+      if (hits.length) { const d = daysLeft(effExp(hits[0])); have.push({ label: g.label, item: hits[0].name, d }); score += urgencyWeight(d) * (g.opt ? 0.5 : 1); used++; }
+      else if (!g.opt) missing.push(g.label);
+    }
+    const req = r.ing.filter((g) => !g.opt).length;
+    const haveReq = req - missing.length;
+    if (!missing.length) res.push({ r, have, missing, score, kind: "now" });
+    else if (missing.length <= 2 && haveReq >= Math.max(1, missing.length)) res.push({ r, have, missing, score: score - missing.length * 2, kind: "almost" });
+  }
+  return res.sort((a, b) => b.score - a.score);
+}
+function recipeCard(m) {
+  const urgent = m.have.filter((h) => h.d !== null && h.d <= 3);
+  return `<div class="recipe"><div class="top"><h3>${esc(m.r.t)}</h3><span class="pill p-muted">${m.r.min} Min.</span></div>
+    ${urgent.length ? `<p class="note warnnote">Verbraucht: ${urgent.map((h) => `${esc(h.item)} (${h.d <= 0 ? "heute" : h.d === 1 ? "morgen" : `in ${h.d} Tagen`})`).join(", ")}</p>` : ""}
+    <div class="tags">${m.have.map((h) => `<span class="pill p-green">${esc(h.label)}</span>`).join("")}${m.missing.map((x) => `<span class="pill p-amber">fehlt: ${esc(x)}</span>`).join("")}</div>
+    ${m.missing.length ? `<button class="btn ghost" data-buy="${esc(m.missing.join("|"))}">${m.missing.length === 1 ? `${esc(m.missing[0])} auf die Einkaufsliste` : "Fehlendes auf die Einkaufsliste"}</button>` : ""}
+    <details class="more"><summary>So geht’s</summary><ol>${m.r.s.map((x) => `<li>${esc(x)}</li>`).join("")}</ol></details></div>`;
+}
+function renderCook() {
+  if (!$("#v-cook")) return;
+  const all = matchRecipes();
+  const now = all.filter((m) => m.kind === "now").slice(0, 6), almost = all.filter((m) => m.kind === "almost").slice(0, 8);
+  $("#cookNow").innerHTML = now.length ? now.map(recipeCard).join("") : `<p class="note">Mit dem, was gerade da ist, passt noch kein ganzes Gericht. Schau unter „Fast komplett“.</p>`;
+  $("#cookAlmost").innerHTML = almost.length ? almost.map(recipeCard).join("") : `<p class="note">Tragt ein paar Lebensmittel ein, dann erscheinen hier Vorschläge.</p>`;
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-buy]"); if (!b) return;
+  for (const n of b.dataset.buy.split("|")) if (!onList(n)) addToList(n, 1, "Stk");
+  b.disabled = true; b.textContent = "Steht auf der Einkaufsliste";
 });
 
 /* ---------- Start ---------- */
