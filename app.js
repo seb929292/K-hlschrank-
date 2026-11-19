@@ -27,7 +27,7 @@ function load(k, fallback) { try { const v = JSON.parse(localStorage.getItem(k) 
 function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { toast("Speichern nicht möglich (privater Modus?)"); } }
 let items = load(KEY, []);
 let products = load(PKEY, {});   // gelernte Produkte: EAN -> {name, cat, qty, unit, place, days}
-let place = "Alle", takeId = null;
+let place = "Alle", takeId = null, moveId = null;
 const store = {
   add(r) { r.id = uid(); r.qty0 = r.qty0 ?? r.qty; items.push(r); save(KEY, items); render(); return r; },
   update(id, patch) { const r = items.find((x) => x.id === id); if (r) Object.assign(r, patch); save(KEY, items); render(); },
@@ -65,7 +65,7 @@ function render() {
     const [cls, txt] = urgency(daysLeft(effExp(r))); const col = (CATS[r.cat] || CATS.Sonstiges).c;
     return `<div class="item"><span class="dot" style="background:${col}"></span><span class="name">${esc(r.name)}</span><span class="pill ${cls}">${txt}</span>
     <span class="meta">${fmtQty(r)} · ${esc(r.cat)} · ${esc(r.place)}${r.opened ? " · angebrochen" : ""}</span>
-    <div class="acts"><button class="act" data-a="used" data-id="${r.id}">Aufgebraucht</button>${r.unit === "Stk" ? `<button class="act" data-a="one" data-id="${r.id}">1 weniger</button>` : ""}<button class="act" data-a="take" data-id="${r.id}">Menge entnehmen</button>${r.opened ? "" : `<button class="act" data-a="open" data-id="${r.id}">Angebrochen</button>`}<button class="act warn" data-a="waste" data-id="${r.id}">Weggeworfen</button></div>${takeId === r.id ? takePanel(r) : ""}</div>`;
+    <div class="acts"><button class="act" data-a="used" data-id="${r.id}">Aufgebraucht</button>${r.unit === "Stk" ? `<button class="act" data-a="one" data-id="${r.id}">1 weniger</button>` : ""}<button class="act" data-a="take" data-id="${r.id}">Menge entnehmen</button>${r.opened ? "" : `<button class="act" data-a="open" data-id="${r.id}">Angebrochen</button>`}<button class="act" data-a="move" data-id="${r.id}">Ort ändern</button><button class="act warn" data-a="waste" data-id="${r.id}">Weggeworfen</button></div>${takeId === r.id ? takePanel(r) : ""}${moveId === r.id ? `<div class="take"><span class="note">Wohin kommt ${esc(r.name)}?</span><div class="tags">${PLACES.filter((p) => p !== r.place).map((p) => `<button class="act" data-a="moveTo" data-v="${p}" data-id="${r.id}">${p}</button>`).join("")}</div></div>` : ""}</div>`;
   }).join("") + "</div>";
   const m = today().slice(0, 7);
   const wasted = items.filter((r) => r.status === "weggeworfen" && (r.done || "").startsWith(m)).length;
@@ -94,6 +94,8 @@ document.addEventListener("click", (e) => {
   if (a === "waste") { store.update(r.id, { status: "weggeworfen", done: today() }); toast(`${r.name}: weggeworfen, zählt in die Statistik`); }
   if (a === "open") { store.update(r.id, { opened: today() }); toast(`${r.name}: angebrochen, Haltbarkeit angepasst`); }
   if (a === "one") takeAmount(r, 1);
+  if (a === "move") { moveId = moveId === r.id ? null : r.id; render(); return; }
+  if (a === "moveTo") { moveId = null; moveItem(r, b.dataset.v); return; }
   if (a === "take") { takeId = takeId === r.id ? null : r.id; render(); const el = $("#take-amt"); if (el) el.focus(); return; }
   if (a === "pre") { $("#take-amt").value = b.dataset.v; return; }
   if (a === "takeGo") { const v = parseFloat(String($("#take-amt").value).replace(",", ".")); if (!(v > 0)) { toast("Bitte eine Menge eingeben."); return; } takeId = null; takeAmount(r, v); }
@@ -111,7 +113,7 @@ document.addEventListener("change", (e) => {
     if (!d) { toast("Datum nicht erkannt. Beispiele: 1203, 12.03.27 oder 03.2027"); return; }
     store.update(r.id, { exp: d, expSource: "eingetragen" }); learnExp(r, d); renderRecent(); toast(`${r.name}: haltbar bis ${d.split("-").reverse().join(".")}`);
   }
-  if (t.matches("[data-placefor]")) { const r = items.find((x) => x.id === t.dataset.placefor); if (r) { store.update(r.id, { place: t.value }); learn(r, { place: t.value }); } }
+  if (t.matches("[data-placefor]")) { const r = items.find((x) => x.id === t.dataset.placefor); if (r) { moveItem(r, t.value); renderRecent(); } }
 });
 document.querySelectorAll("nav button").forEach((b) => b.onclick = () => {
   document.querySelectorAll("nav button").forEach((x) => x.removeAttribute("aria-current")); b.setAttribute("aria-current", "page");
@@ -211,19 +213,32 @@ function onCode(code) {
   handleCode(code, false);
 }
 
-function mapCategory(tags) {
-  const t = (tags || []).join(" ");
+// Erkennt Tiefkühlware auch ohne passende Kategorie in Open Food Facts: über Lagerhinweise (-18 °C) und typische Namen.
+const FROZEN_RE = /tiefk[üu]hl|tiefgefroren|tiefgek[üu]hlt|gefroren|gefrier|frozen|surgel|congel|-\s?18\s?°|\bTK\b|fischst[äa]bchen|backfisch|schlemmerfilet|pommes|kroketten|r[öo]sti-?ecken|tk-|eiscreme|speiseeis|rahmspinat|kaisergem[üu]se|gem[üu]sepfanne|gyrospfanne|bami goreng|nasi goreng|steinofenpizza|pizza/i;
+function isFrozen(tags, text) { return (tags || []).some((t) => t.includes("frozen")) || FROZEN_RE.test(text || ""); }
+function mapCategory(tags, text = "") {
+  if (isFrozen(tags, text)) return "Tiefkühl";
+  const t = (tags || []).join(" ") + " " + String(text).toLowerCase();
   const has = (...k) => k.some((x) => t.includes(x));
-  if (has("frozen")) return "Tiefkühl";
-  if (has("eggs")) return "Eier";
-  if (has("meats", "poultry", "fishes", "seafood", "sausages", "hams")) return "Fleisch & Fisch";
-  if (has("dairies", "cheeses", "yogurts", "milks", "creams", "butters", "desserts")) return "Milchprodukte";
-  if (has("breads", "pastries", "viennoiseries", "rolls")) return "Brot & Backwaren";
-  if (has("beverages", "drinks", "juices", "waters", "sodas")) return "Getränke";
-  if (has("fresh-vegetables", "en:vegetables")) return "Gemüse";
-  if (has("fresh-fruits", "en:fruits")) return "Obst";
-  if (has("pastas", "rices", "cereals", "canned", "sauces", "snacks", "sweets", "chocolates", "flours", "spreads", "condiments", "legumes", "coffees", "teas")) return "Trockenware";
+  if (has("eggs", " eier")) return "Eier";
+  if (has("meats", "poultry", "fishes", "seafood", "sausages", "hams", "hähnchen", "huhn", "pute", "rind", "schwein", "hack", "fisch", "lachs", "wurst", "schinken", "salami")) return "Fleisch & Fisch";
+  if (has("dairies", "cheeses", "yogurts", "milks", "creams", "butters", "desserts", "milch", "käse", "joghurt", "sahne", "quark", "butter")) return "Milchprodukte";
+  if (has("breads", "pastries", "viennoiseries", "rolls", "brot", "toast", "brötchen")) return "Brot & Backwaren";
+  if (has("beverages", "drinks", "juices", "waters", "sodas", "saft", "wasser", "limo")) return "Getränke";
+  if (has("fresh-vegetables", "en:vegetables", "gemüse")) return "Gemüse";
+  if (has("fresh-fruits", "en:fruits", "obst")) return "Obst";
+  if (has("pastas", "rices", "cereals", "canned", "sauces", "snacks", "sweets", "chocolates", "flours", "spreads", "condiments", "legumes", "coffees", "teas", "nudel", "reis", "mehl")) return "Trockenware";
   return "Sonstiges";
+}
+// Ort ändern: Tiefkühler verlängert die Haltbarkeit, Auftauen verkürzt sie. Die App merkt sich den Ort pro Barcode.
+function moveItem(r, to) {
+  if (!to || to === r.place) return;
+  const patch = { place: to };
+  if (to === "Tiefkühler") { patch.cat = "Tiefkühl"; const e = plus(180); if (!r.exp || r.exp < e) patch.exp = e; patch.expSource = "geschätzt"; }
+  if (r.place === "Tiefkühler" && to !== "Tiefkühler") { patch.exp = plus(r.cat === "Fleisch & Fisch" || /h[äa]hnchen|fisch|fleisch|hack/i.test(r.name) ? 1 : 2); patch.opened = today(); }
+  store.update(r.id, patch);
+  learn(r, to === "Tiefkühler" ? { place: to, cat: "Tiefkühl", days: 180, learned: true } : { place: to, learned: true });
+  toast(to === "Tiefkühler" ? `${r.name}: in den Tiefkühler, haltbar ca. 6 Monate` : r.place === "Tiefkühler" ? `${r.name}: aufgetaut, bald verbrauchen` : `${r.name}: jetzt im ${to === "Vorrat" ? "Vorrat" : to}`);
 }
 function parseQuantity(p) {
   const s = String(p.quantity || "").toLowerCase();
@@ -236,8 +251,9 @@ function parseQuantity(p) {
   return { qty: 1, unit: "Pck" };
 }
 async function lookup(code) {
-  if (products[code]) return { ...products[code], known: true };
-  const url = `https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,product_name_de,generic_name_de,brands,quantity,product_quantity,product_quantity_unit,categories_tags`;
+  // Gemerktes nur nehmen, wenn ihr es selbst korrigiert oder benannt habt; sonst frisch nachschlagen.
+  if (products[code] && (products[code].learned || products[code].manual)) return { ...products[code], known: true };
+  const url = `https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,product_name_de,generic_name_de,brands,quantity,product_quantity,product_quantity_unit,categories_tags,categories,conservation_conditions,conservation_conditions_de,labels_tags`;
   const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 8000);
   try {
     const res = await fetch(url, { signal: ctl.signal }); const j = await res.json();
@@ -245,7 +261,7 @@ async function lookup(code) {
     const p = j.product; const name = (p.product_name_de || p.product_name || p.generic_name_de || "").trim();
     if (!name) return null;
     const brand = (p.brands || "").split(",")[0].trim();
-    const cat = mapCategory(p.categories_tags);
+    const cat = mapCategory(p.categories_tags, [name, p.categories, p.conservation_conditions, p.conservation_conditions_de, (p.labels_tags || []).join(" ")].join(" "));
     const { qty, unit } = parseQuantity(p);
     return { name: brand && !name.toLowerCase().includes(brand.toLowerCase()) ? `${name} (${brand})` : name, cat, qty, unit, place: defaultPlace(cat), days: estimateDays(name, p.categories_tags, cat) };
   } catch (e) { return { offline: true }; }
@@ -300,7 +316,7 @@ document.addEventListener("submit", (e) => {
   const q = QUICK.find((x) => v.toLowerCase().startsWith(x[0].toLowerCase().slice(0, 4)));
   const cat = q ? q[1] : "Sonstiges";
   store.update(id, { name: v, unknown: false, cat });
-  learn(items.find((x) => x.id === id), { name: v, cat });
+  learn(items.find((x) => x.id === id), { name: v, cat, manual: true });
   renderRecent(); toast(`${v} gespeichert. Beim nächsten Scan erkennt die App es sofort.`);
 });
 
