@@ -29,7 +29,7 @@ let items = load(KEY, []);
 let products = load(PKEY, {});   // gelernte Produkte: EAN -> {name, cat, qty, unit, place, days}
 let place = "Alle", takeId = null;
 const store = {
-  add(r) { r.id = uid(); items.push(r); save(KEY, items); render(); return r; },
+  add(r) { r.id = uid(); r.qty0 = r.qty0 ?? r.qty; items.push(r); save(KEY, items); render(); return r; },
   update(id, patch) { const r = items.find((x) => x.id === id); if (r) Object.assign(r, patch); save(KEY, items); render(); },
   remove(id) { items = items.filter((x) => x.id !== id); save(KEY, items); render(); },
 };
@@ -71,6 +71,7 @@ function render() {
   const wasted = items.filter((r) => r.status === "weggeworfen" && (r.done || "").startsWith(m)).length;
   const used = items.filter((r) => r.status === "aufgebraucht" && (r.done || "").startsWith(m)).length;
   $("#stats").textContent = `Diesen Monat: ${used} aufgebraucht, ${wasted} weggeworfen.`;
+  renderShop();
 }
 function takePanel(r) {
   const u = r.unit; const pre = (u === "Stk" ? [1, 2, 3] : u === "Pck" ? [0.25, 0.5] : [25, 50, 100]).filter((v) => v < Number(r.qty));
@@ -103,12 +104,18 @@ document.addEventListener("click", (e) => {
 document.addEventListener("change", (e) => {
   const t = e.target;
   if (t.matches("[data-expdate]")) { const r = items.find((x) => x.id === t.dataset.expdate); if (r && t.value) { store.update(r.id, { exp: t.value }); renderRecent(); } }
-  if (t.matches("[data-qty]")) { const r = items.find((x) => x.id === t.dataset.qty); const v = parseFloat(String(t.value).replace(",", ".")); if (r && v > 0) { store.update(r.id, { qty: v }); learn(r, { qty: v }); } }
+  if (t.matches("[data-qty]")) { const r = items.find((x) => x.id === t.dataset.qty); const v = parseFloat(String(t.value).replace(",", ".")); if (r && v > 0) { store.update(r.id, { qty: v, qty0: v }); learn(r, { qty: v }); } }
+  if (t.matches("[data-mhd]")) {
+    const r = items.find((x) => x.id === t.dataset.mhd); if (!r || !t.value.trim()) return;
+    const d = parseMhd(t.value);
+    if (!d) { toast("Datum nicht erkannt. Beispiele: 1203, 12.03.27 oder 03.2027"); return; }
+    store.update(r.id, { exp: d }); renderRecent(); toast(`${r.name}: haltbar bis ${d.split("-").reverse().join(".")}`);
+  }
   if (t.matches("[data-placefor]")) { const r = items.find((x) => x.id === t.dataset.placefor); if (r) { store.update(r.id, { place: t.value }); learn(r, { place: t.value }); } }
 });
 document.querySelectorAll("nav button").forEach((b) => b.onclick = () => {
   document.querySelectorAll("nav button").forEach((x) => x.removeAttribute("aria-current")); b.setAttribute("aria-current", "page");
-  ["bestand", "scan", "add"].forEach((v) => $("#v-" + v).hidden = v !== b.dataset.view);
+  ["bestand", "scan", "shop", "add"].forEach((v) => $("#v-" + v).hidden = v !== b.dataset.view);
   if (b.dataset.view !== "scan") stopScan();
   window.scrollTo(0, 0);
 });
@@ -122,8 +129,9 @@ $("#f-cat").onchange = () => { const c = $("#f-cat").value; $("#f-exp").value = 
 $("#f-exp").value = plus(7);
 $("#form").addEventListener("submit", (e) => {
   e.preventDefault(); const n = $("#f-name").value.trim(); if (!n) return;
+  const dn = dupNote(n);
   store.add({ name: n, qty: Number($("#f-qty").value) || 1, unit: $("#f-unit").value, cat: $("#f-cat").value, place: $("#f-place").value, exp: $("#f-exp").value || null, status: "aktiv", added: today() });
-  toast(`${n} hinzugefügt`); $("#form").reset(); $("#f-qty").value = 1; $("#f-exp").value = plus(7);
+  toast(dn ? `${n} hinzugefügt. ${dn}` : `${n} hinzugefügt`); $("#form").reset(); $("#f-qty").value = 1; $("#f-exp").value = plus(7);
 });
 $("#quick").innerHTML = QUICK.map((q, i) => `<button data-q="${i}">${q[0]}</button>`).join("");
 $("#quick").onclick = (e) => {
@@ -257,9 +265,10 @@ async function handleCode(code, manual) {
     return;
   }
   beep(true);
-  const r = store.add({ name: info.name, ean: code, qty: info.qty, unit: info.unit, cat: info.cat, place: chosen === "auto" ? info.place : chosen, exp: plus(info.days), status: "aktiv", added: today() });
+  const dup = dupNote(info.name, code);
+  const r = store.add({ name: info.name, ean: code, qty: info.qty, unit: info.unit, cat: info.cat, place: chosen === "auto" ? info.place : chosen, exp: plus(info.days), status: "aktiv", added: today(), dupNote: dup || undefined });
   recent.unshift(r.id); renderRecent();
-  $("#scanStatus").textContent = `Eingetragen: ${info.name}. Nächstes Produkt einfach scannen.`;
+  $("#scanStatus").textContent = dup ? `Eingetragen: ${info.name}. ${dup}` : `Eingetragen: ${info.name}. Nächstes Produkt einfach scannen.`;
 }
 
 function renderRecent() {
@@ -271,10 +280,13 @@ function renderRecent() {
       : "";
     return `<div class="card scanned"><div class="top"><b>${esc(r.name)}</b><span class="pill ${cls}">${txt}</span></div>
       ${nameField}
-      <div class="row3"><label>Menge (${esc(r.unit)})<input type="number" min="0" step="any" value="${r.qty}" data-qty="${r.id}"></label>
-      <label>Haltbar bis<input type="date" value="${r.exp || ""}" data-expdate="${r.id}"></label>
+      ${r.dupNote ? `<p class="note warnnote">${esc(r.dupNote)}</p>` : ""}
+      <div class="row"><label>MHD eintippen<input type="text" inputmode="numeric" enterkeyhint="done" placeholder="z. B. 1203" data-mhd="${r.id}" autocomplete="off"></label>
+      <label>oder auswählen<input type="date" value="${r.exp || ""}" data-expdate="${r.id}"></label></div>
+      <div class="tags">${[3, 7, 14, 30].map((d) => `<button class="act" data-a="exp" data-v="${d}" data-id="${r.id}">+${d} Tage</button>`).join("")}</div>
+      <div class="row"><label>Menge (${esc(r.unit)})<input type="number" min="0" step="any" value="${r.qty}" data-qty="${r.id}"></label>
       <label>Ort<select data-placefor="${r.id}">${PLACES.map((p) => `<option${p === r.place ? " selected" : ""}>${p}</option>`).join("")}</select></label></div>
-      <div class="tags">${[3, 7, 14, 30].map((d) => `<button class="act" data-a="exp" data-v="${d}" data-id="${r.id}">+${d} Tage</button>`).join("")}<button class="act warn" data-a="undo" data-id="${r.id}">Rückgängig</button></div></div>`;
+      <div class="tags"><button class="act warn" data-a="undo" data-id="${r.id}">Rückgängig</button></div></div>`;
   }).join("");
 }
 document.addEventListener("submit", (e) => {
@@ -286,6 +298,130 @@ document.addEventListener("submit", (e) => {
   store.update(id, { name: v, unknown: false, cat });
   learn(items.find((x) => x.id === id), { name: v, cat });
   renderRecent(); toast(`${v} gespeichert. Beim nächsten Scan erkennt die App es sofort.`);
+});
+
+/* ---------- MHD schnell eintippen ---------- */
+// Versteht: 1203 · 12.03 · 120327 · 12.03.27 · 12032027 · 03.2027 (Monat/Jahr -> letzter Tag)
+function parseMhd(raw) {
+  const s = String(raw).trim(); let d, m, y;
+  if (/^\d+$/.test(s)) {
+    if (s.length === 4) { d = s.slice(0, 2); m = s.slice(2); }
+    else if (s.length === 6 || s.length === 8) { d = s.slice(0, 2); m = s.slice(2, 4); y = s.slice(4); }
+    else return null;
+  } else {
+    const p = s.split(/[.\/\-\s]+/).filter(Boolean);
+    if (p.length === 2 && p[1].length === 4) { m = +p[0]; y = +p[1]; if (!(m >= 1 && m <= 12)) return null; return iso(new Date(y, m, 0, 12)); }
+    if (p.length < 2 || p.length > 3) return null;
+    [d, m, y] = p;
+  }
+  d = +d; m = +m; if (!(d >= 1 && d <= 31 && m >= 1 && m <= 12)) return null;
+  const yr = y ? (+y < 100 ? 2000 + +y : +y) : new Date().getFullYear();
+  const dt = new Date(yr, m - 1, d, 12); if (dt.getMonth() !== m - 1) return null;
+  if (!y && iso(dt) < plus(-30)) dt.setFullYear(yr + 1);
+  return iso(dt);
+}
+
+/* ---------- Doppelkauf ---------- */
+function dupNote(name, ean) {
+  const same = active().filter((r) => (ean && r.ean === ean) || r.name.toLowerCase() === String(name).toLowerCase());
+  if (!same.length) return "";
+  const total = same.reduce((s, r) => s + Number(r.qty), 0);
+  const soon = Math.min(...same.map((r) => daysLeft(effExp(r)) ?? 999));
+  return `Schon da: ${fmtQty({ qty: total, unit: same[0].unit })}${soon < 999 ? `, läuft ${soon <= 0 ? "heute" : soon === 1 ? "morgen" : `in ${soon} Tagen`} ab` : ""}.`;
+}
+
+/* ---------- Einkaufsliste & Nachkauf ---------- */
+const SHOPS = ["Egal", "Aldi", "Lidl", "Rewe", "Edeka", "Kaufland", "Netto", "Penny", "dm"];
+const LKEY = "kuehlschrank-list-v1", SKEY = "kuehlschrank-shops-v1", DKEY = "kuehlschrank-dismissed-v1";
+let shopList = load(LKEY, []);
+let shopOf = load(SKEY, {});       // Produktname (klein) -> Laden
+let dismissed = load(DKEY, {});    // Produktname (klein) -> Datum, bis wann ausgeblendet
+const key = (n) => String(n).trim().toLowerCase();
+const daysBetween = (a, b) => Math.round((new Date(b + "T12:00") - new Date(a + "T12:00")) / 864e5);
+const median = (a) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+const onList = (n) => shopList.some((l) => !l.done && key(l.name) === key(n));
+
+function suggestions() {
+  const groups = {};
+  for (const r of items) (groups[key(r.name)] ||= []).push(r);
+  const out = [];
+  for (const [k, rs] of Object.entries(groups)) {
+    const last = rs[rs.length - 1]; const name = last.name;
+    if (last.unknown || onList(name) || (dismissed[k] && dismissed[k] >= today())) continue;
+    const stock = rs.filter((r) => r.status === "aktiv");
+    const usual = median(rs.map((r) => Number(r.qty0 ?? r.qty)).filter((x) => x > 0)) || 1;
+    let reason = "", prio = 0;
+    if (!stock.length) {
+      const lastDone = rs.map((r) => r.done).filter(Boolean).sort().pop();
+      if (lastDone && daysBetween(lastDone, today()) <= 30) {
+        const ago = daysBetween(lastDone, today());
+        reason = ago === 0 ? "heute leer geworden" : `leer seit ${ago} ${ago === 1 ? "Tag" : "Tagen"}`; prio = 3;
+      }
+    } else {
+      const total = stock.reduce((s, r) => s + Number(r.qty), 0), total0 = stock.reduce((s, r) => s + Number(r.qty0 ?? r.qty), 0);
+      const low = last.unit === "Stk" ? (total <= 1 && total0 > 1) || (total0 >= 4 && total <= total0 * 0.25) : total <= total0 * 0.25;
+      if (low) { reason = `nur noch ${fmtQty({ qty: total, unit: last.unit })}`; prio = 2; }
+    }
+    const days = [...new Set(rs.map((r) => r.added).filter(Boolean))].sort();
+    if (days.length >= 2) {
+      const every = Math.max(1, Math.round(daysBetween(days[0], days[days.length - 1]) / (days.length - 1)));
+      const since = daysBetween(days[days.length - 1], today());
+      if (reason) reason += ` · kauft ihr etwa alle ${every} Tage`;
+      else if (!stock.length && since >= every) { reason = `kauft ihr etwa alle ${every} Tage, zuletzt vor ${since} Tagen`; prio = 1; }
+    }
+    if (reason) out.push({ name, reason, prio, qty: usual, unit: last.unit });
+  }
+  return out.sort((a, b) => b.prio - a.prio || a.name.localeCompare(b.name));
+}
+
+function addToList(name, qty, unit) {
+  const d = dupNote(name);
+  shopList.push({ id: uid(), name, qty: qty || 1, unit: unit || "Stk", shop: shopOf[key(name)] || "Egal", done: false });
+  save(LKEY, shopList); renderShop();
+  toast(d ? `${name} auf der Liste. ${d}` : `${name} auf der Liste`);
+}
+function renderShop() {
+  if (!$("#v-shop")) return;
+  const sug = suggestions();
+  $("#sugCount").textContent = sug.length ? String(sug.length) : "";
+  $("#suggest").innerHTML = sug.length
+    ? '<div class="list">' + sug.map((s) => `<div class="item"><span class="dot" style="background:var(${s.prio === 3 ? "--red" : s.prio === 2 ? "--amber" : "--accent"})"></span><span class="name">${esc(s.name)}</span><span class="pill p-muted">${fmtQty(s)}</span><span class="meta">${esc(s.reason)}</span><div class="acts"><button class="act" data-s="add" data-n="${esc(s.name)}" data-q="${s.qty}" data-u="${s.unit}">Auf die Liste</button><button class="act" data-s="hide" data-n="${esc(s.name)}">Diese Woche nicht</button></div></div>`).join("") + "</div>"
+    : `<div class="empty"><p>Gerade nichts nachzukaufen. Vorschläge erscheinen, wenn etwas leer wird oder knapp ist, und wenn die App merkt, wie oft ihr etwas kauft.</p></div>`;
+  const open = shopList.filter((l) => !l.done), done = shopList.filter((l) => l.done);
+  const byShop = {};
+  for (const l of open) (byShop[l.shop] ||= []).push(l);
+  const order = SHOPS.filter((s) => byShop[s]).concat(Object.keys(byShop).filter((s) => !SHOPS.includes(s)));
+  $("#shoplist").innerHTML = open.length
+    ? order.map((s) => `<h3 class="shopname">${s === "Egal" ? "Egal wo" : esc(s)}</h3><div class="list">${byShop[s].map(rowHtml).join("")}</div>`).join("")
+    : `<p class="note">Die Liste ist leer.</p>`;
+  $("#shopdone").innerHTML = done.length ? `<h3 class="shopname">Erledigt</h3><div class="list">${done.map(rowHtml).join("")}</div><button class="btn ghost" id="clearDone">Erledigte entfernen</button>` : "";
+}
+function rowHtml(l) {
+  return `<div class="item shoprow${l.done ? " done" : ""}"><input type="checkbox" aria-label="${esc(l.name)} erledigt" data-l="check" data-id="${l.id}"${l.done ? " checked" : ""}><span class="name">${esc(l.name)}</span><span class="pill p-muted">${fmtQty(l)}</span>
+    <select class="meta shopsel" aria-label="Laden für ${esc(l.name)}" data-l="shop" data-id="${l.id}">${SHOPS.map((s) => `<option${s === l.shop ? " selected" : ""}>${s}</option>`).join("")}</select></div>`;
+}
+document.addEventListener("click", (e) => {
+  const s = e.target.closest("[data-s]");
+  if (s) {
+    if (s.dataset.s === "add") addToList(s.dataset.n, Number(s.dataset.q), s.dataset.u);
+    if (s.dataset.s === "hide") { dismissed[key(s.dataset.n)] = plus(7); save(DKEY, dismissed); renderShop(); }
+    return;
+  }
+  if (e.target.id === "clearDone") { shopList = shopList.filter((l) => !l.done); save(LKEY, shopList); renderShop(); }
+});
+document.addEventListener("change", (e) => {
+  const t = e.target; if (!t.dataset || !t.dataset.l) return;
+  const l = shopList.find((x) => x.id === t.dataset.id); if (!l) return;
+  if (t.dataset.l === "check") l.done = t.checked;
+  if (t.dataset.l === "shop") { l.shop = t.value; shopOf[key(l.name)] = t.value; save(SKEY, shopOf); }
+  save(LKEY, shopList); renderShop();
+});
+$("#listAdd").addEventListener("submit", (e) => {
+  e.preventDefault(); const v = $("#listInput").value.trim(); if (!v) return;
+  const m = v.match(/^(\d+[.,]?\d*)\s*(g|ml|stk|pck)?\.?\s+(.+)$/i);
+  if (m) addToList(m[3], parseFloat(m[1].replace(",", ".")), ({ g: "g", ml: "ml", stk: "Stk", pck: "Pck" })[String(m[2] || "stk").toLowerCase()]);
+  else addToList(v, 1, "Stk");
+  $("#listInput").value = "";
 });
 
 /* ---------- Start ---------- */
