@@ -3,6 +3,6 @@
 // Wer was sehen darf, regeln die Zugriffsregeln in supabase/schema.sql.
 // NIEMALS den "service_role"/"secret" Schlüssel hier eintragen.
 window.KS_CONFIG = {
-  supabaseUrl: "",
-  supabaseAnonKey: "",
+  supabaseUrl: "https://llrivlczpbnpenbwsldp.supabase.co",
+  supabaseAnonKey: "sb_publishable_LKiPBnh6TlVedNhE7bN4lw_2Pbc46cC",
 };

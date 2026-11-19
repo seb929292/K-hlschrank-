@@ -62,6 +62,13 @@ create policy "Mitglieder ändern" on public.entries
 -- So verschickt der Live-Abgleich keine Lösch-Meldungen, die RLS nicht filtern kann.
 drop policy if exists "Mitglieder löschen" on public.entries;
 
+-- Rechte nur für angemeldete Nutzer (neue Supabase-Projekte vergeben keine automatisch).
+-- Nicht angemeldete Besucher (anon) bekommen bewusst gar nichts.
+grant usage on schema public to authenticated;
+grant select on public.households, public.household_members to authenticated;
+grant select, insert, update on public.entries to authenticated;
+revoke all on public.households, public.household_members, public.entries from anon;
+
 -- Haushalt anlegen (der Ersteller wird automatisch Mitglied)
 create or replace function public.create_household(hname text default 'Unser Haushalt')
 returns public.households language plpgsql security definer set search_path = public as $$
