@@ -16,12 +16,13 @@
   <header>
     <div>
       <h1>Unser Kühlschrank</h1>
-      <p class="sub">Version 0.4 · gespeichert auf diesem Gerät</p>
+      <p class="sub">Version 0.5 · <button class="linkbtn" id="modeSub" type="button">Nur auf diesem Gerät · Teilen einrichten</button></p>
     </div>
     <div class="alerts" id="alerts"></div>
   </header>
 
   <section class="section" id="v-bestand">
+    <div class="card" id="household" hidden></div>
     <div class="chips" id="placeChips" role="group" aria-label="Lagerort"></div>
     <div id="list"></div>
     <p class="note" id="stats"></p>
@@ -119,7 +120,10 @@
 <div class="toast" id="toast" hidden></div>
 
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
 <script src="recipes.js"></script>
 <script src="app.js"></script>
+<script src="sync.js"></script>
 </body>
 </html>

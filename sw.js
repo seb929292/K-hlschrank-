@@ -1,6 +1,6 @@
 // Einfacher Offline-Cache für die App-Dateien. Produktabfragen gehen immer ins Netz.
-const CACHE = "kuehlschrank-v6";
-const FILES = ["./", "index.html", "style.css", "app.js", "recipes.js", "manifest.webmanifest", "icon.svg"];
+const CACHE = "kuehlschrank-v7";
+const FILES = ["./", "index.html", "style.css", "app.js", "recipes.js", "sync.js", "config.js", "manifest.webmanifest", "icon.svg"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener("activate", (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k))))); self.clients.claim(); });
 self.addEventListener("fetch", (e) => {

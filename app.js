@@ -24,7 +24,7 @@ const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) 
 /* ---------- Speicher ---------- */
 const KEY = "kuehlschrank-items-v1", PKEY = "kuehlschrank-products-v1";
 function load(k, fallback) { try { const v = JSON.parse(localStorage.getItem(k) || "null"); return v ?? fallback; } catch (e) { return fallback; } }
-function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { toast("Speichern nicht möglich (privater Modus?)"); } }
+function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { toast("Speichern nicht möglich (privater Modus?)"); } if (window.onSaved) window.onSaved(k); }
 let items = load(KEY, []);
 let products = load(PKEY, {});   // gelernte Produkte: EAN -> {name, cat, qty, unit, place, days}
 let place = "Alle", takeId = null, moveId = null;
