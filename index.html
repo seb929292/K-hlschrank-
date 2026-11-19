@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Unser Kühlschrank</title>
+<meta name="theme-color" content="#0f6b63">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700&family=Inter:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Unser Kühlschrank</h1>
+      <p class="sub">Version 0.1 · gespeichert auf diesem Gerät</p>
+    </div>
+    <div class="alerts" id="alerts"></div>
+  </header>
+
+  <section class="section" id="v-bestand">
+    <div class="chips" id="placeChips" role="group" aria-label="Lagerort"></div>
+    <div id="list"></div>
+    <p class="note" id="stats"></p>
+  </section>
+
+  <section class="section" id="v-scan" hidden>
+    <div class="card">
+      <div id="reader" class="reader"></div>
+      <p class="status" id="scanStatus">Auf „Scanner starten“ tippen und einen Barcode nach dem anderen vor die Kamera halten.</p>
+      <div class="row">
+        <button class="btn" id="scanStart">Scanner starten</button>
+        <button class="btn ghost" id="scanStop" disabled>Stopp</button>
+      </div>
+      <label for="scanPlace">Gescannte Produkte kommen in
+        <select id="scanPlace"><option value="auto">Automatisch nach Produktart</option><option>Kühlschrank</option><option>Tiefkühler</option><option>Vorrat</option></select>
+      </label>
+      <form id="manualEan" class="row">
+        <input id="eanInput" inputmode="numeric" placeholder="Barcode-Nummer eintippen" aria-label="Barcode-Nummer">
+        <button class="btn ghost" type="submit">Suchen</button>
+      </form>
+    </div>
+    <div id="recent" class="section" style="padding:0"></div>
+    <p class="note">Produktdaten von <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a>. Das Ablaufdatum steht nicht im Barcode. Die App setzt eine übliche Haltbarkeit, die ihr unten mit einem Tipp anpasst.</p>
+  </section>
+
+  <section class="section" id="v-add" hidden>
+    <div class="card">
+      <h2>Lose Ware antippen</h2>
+      <p class="note">Jeder Tipp legt 1 Stück mit üblicher Haltbarkeit an.</p>
+      <div class="quick" id="quick"></div>
+    </div>
+    <div class="card">
+      <h2>Schnell eingeben</h2>
+      <label for="fast">Zum Beispiel: 4 Äpfel, 1 Gurke, 500 g Hackfleisch</label>
+      <input id="fast" type="text" placeholder="4 Äpfel, 1 Gurke" autocomplete="off">
+      <button class="btn ghost" id="fastBtn">Eintragen</button>
+      <p class="status" id="fastStatus"></p>
+    </div>
+    <form class="card" id="form">
+      <h2>Formular</h2>
+      <label for="f-name">Produkt<input id="f-name" required placeholder="z. B. Schlagsahne"></label>
+      <div class="row3">
+        <label for="f-qty">Menge<input id="f-qty" type="number" min="0" step="any" value="1"></label>
+        <label for="f-unit">Einheit<select id="f-unit"><option>Stk</option><option>g</option><option>ml</option><option>Pck</option></select></label>
+        <label for="f-place">Ort<select id="f-place"></select></label>
+      </div>
+      <div class="row">
+        <label for="f-cat">Kategorie<select id="f-cat"></select></label>
+        <label for="f-exp">Haltbar bis<input id="f-exp" type="date"></label>
+      </div>
+      <button class="btn" type="submit">Hinzufügen</button>
+    </form>
+  </section>
+</div>
+
+<nav aria-label="Ansicht">
+  <button data-view="bestand" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="2.5" width="14" height="19" rx="2"/><path d="M5 10h14M8 6v2M8 13v3"/></svg>Bestand</button>
+  <button data-view="scan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7V4h3M21 7V4h-3M3 17v3h3M21 17v3h-3M7 8v8M10 8v8M13 8v8M16 8v8"/></svg>Scannen</button>
+  <button data-view="add"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>Hinzufügen</button>
+</nav>
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
