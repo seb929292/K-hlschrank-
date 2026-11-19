@@ -107,7 +107,7 @@
       const { count } = await client.from("household_members").select("user_id", { count: "exact", head: true }).eq("household_id", household.id);
       members = count || 1;
       online = true; await pull(); subscribe();
-    } else online = false;
+    } else { online = false; card.hidden = false; }
     draw();
   }
 
