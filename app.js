@@ -98,18 +98,18 @@ document.addEventListener("click", (e) => {
   if (a === "pre") { $("#take-amt").value = b.dataset.v; return; }
   if (a === "takeGo") { const v = parseFloat(String($("#take-amt").value).replace(",", ".")); if (!(v > 0)) { toast("Bitte eine Menge eingeben."); return; } takeId = null; takeAmount(r, v); }
   // Scan-Karten
-  if (a === "exp") { store.update(r.id, { exp: plus(Number(b.dataset.v)) }); learn(r, { days: Number(b.dataset.v) }); renderRecent(); }
+  if (a === "exp") { store.update(r.id, { exp: plus(Number(b.dataset.v)), expSource: "eingetragen" }); learn(r, { days: Number(b.dataset.v), learned: true }); renderRecent(); }
   if (a === "undo") { store.remove(r.id); recent = recent.filter((x) => x !== r.id); renderRecent(); toast(`${r.name} entfernt`); }
 });
 document.addEventListener("change", (e) => {
   const t = e.target;
-  if (t.matches("[data-expdate]")) { const r = items.find((x) => x.id === t.dataset.expdate); if (r && t.value) { store.update(r.id, { exp: t.value }); renderRecent(); } }
+  if (t.matches("[data-expdate]")) { const r = items.find((x) => x.id === t.dataset.expdate); if (r && t.value) { store.update(r.id, { exp: t.value, expSource: "eingetragen" }); learnExp(r, t.value); renderRecent(); } }
   if (t.matches("[data-qty]")) { const r = items.find((x) => x.id === t.dataset.qty); const v = parseFloat(String(t.value).replace(",", ".")); if (r && v > 0) { store.update(r.id, { qty: v, qty0: v }); learn(r, { qty: v }); } }
   if (t.matches("[data-mhd]")) {
     const r = items.find((x) => x.id === t.dataset.mhd); if (!r || !t.value.trim()) return;
     const d = parseMhd(t.value);
     if (!d) { toast("Datum nicht erkannt. Beispiele: 1203, 12.03.27 oder 03.2027"); return; }
-    store.update(r.id, { exp: d }); renderRecent(); toast(`${r.name}: haltbar bis ${d.split("-").reverse().join(".")}`);
+    store.update(r.id, { exp: d, expSource: "eingetragen" }); learnExp(r, d); renderRecent(); toast(`${r.name}: haltbar bis ${d.split("-").reverse().join(".")}`);
   }
   if (t.matches("[data-placefor]")) { const r = items.find((x) => x.id === t.dataset.placefor); if (r) { store.update(r.id, { place: t.value }); learn(r, { place: t.value }); } }
 });
@@ -247,10 +247,11 @@ async function lookup(code) {
     const brand = (p.brands || "").split(",")[0].trim();
     const cat = mapCategory(p.categories_tags);
     const { qty, unit } = parseQuantity(p);
-    return { name: brand && !name.toLowerCase().includes(brand.toLowerCase()) ? `${name} (${brand})` : name, cat, qty, unit, place: defaultPlace(cat), days: CATS[cat].d };
+    return { name: brand && !name.toLowerCase().includes(brand.toLowerCase()) ? `${name} (${brand})` : name, cat, qty, unit, place: defaultPlace(cat), days: estimateDays(name, p.categories_tags, cat) };
   } catch (e) { return { offline: true }; }
   finally { clearTimeout(t); }
 }
+function learnExp(r, exp) { const d = daysBetween(r.added || today(), exp); if (d > 0) learn(r, { days: d, learned: true }); }
 function learn(r, patch) { if (!r.ean) return; products[r.ean] = { ...(products[r.ean] || { name: r.name, cat: r.cat, qty: r.qty, unit: r.unit, place: r.place, days: CATS[r.cat].d }), ...patch }; save(PKEY, products); }
 
 async function handleCode(code, manual) {
@@ -266,7 +267,7 @@ async function handleCode(code, manual) {
   }
   beep(true);
   const dup = dupNote(info.name, code);
-  const r = store.add({ name: info.name, ean: code, qty: info.qty, unit: info.unit, cat: info.cat, place: chosen === "auto" ? info.place : chosen, exp: plus(info.days), status: "aktiv", added: today(), dupNote: dup || undefined });
+  const r = store.add({ name: info.name, ean: code, qty: info.qty, unit: info.unit, cat: info.cat, place: chosen === "auto" ? info.place : chosen, exp: plus(info.days), expSource: info.known && info.learned ? "gelernt" : "geschätzt", status: "aktiv", added: today(), dupNote: dup || undefined });
   recent.unshift(r.id); renderRecent();
   $("#scanStatus").textContent = dup ? `Eingetragen: ${info.name}. ${dup}` : `Eingetragen: ${info.name}. Nächstes Produkt einfach scannen.`;
 }
@@ -281,11 +282,14 @@ function renderRecent() {
     return `<div class="card scanned"><div class="top"><b>${esc(r.name)}</b><span class="pill ${cls}">${txt}</span></div>
       ${nameField}
       ${r.dupNote ? `<p class="note warnnote">${esc(r.dupNote)}</p>` : ""}
+      <p class="note">Haltbar bis ca. <b>${r.exp ? r.exp.split("-").reverse().join(".") : "?"}</b> · ${r.expSource === "gelernt" ? "so lange wie beim letzten Mal" : r.expSource === "eingetragen" ? "von euch eingetragen" : "geschätzt, übliche Haltbarkeit"}</p>
+      <details class="more"><summary>Datum, Menge oder Ort ändern</summary>
+      <div class="tags">${[3, 7, 14, 30].map((d) => `<button class="act" data-a="exp" data-v="${d}" data-id="${r.id}">+${d} Tage</button>`).join("")}</div>
       <div class="row"><label>MHD eintippen<input type="text" inputmode="numeric" enterkeyhint="done" placeholder="z. B. 1203" data-mhd="${r.id}" autocomplete="off"></label>
       <label>oder auswählen<input type="date" value="${r.exp || ""}" data-expdate="${r.id}"></label></div>
-      <div class="tags">${[3, 7, 14, 30].map((d) => `<button class="act" data-a="exp" data-v="${d}" data-id="${r.id}">+${d} Tage</button>`).join("")}</div>
       <div class="row"><label>Menge (${esc(r.unit)})<input type="number" min="0" step="any" value="${r.qty}" data-qty="${r.id}"></label>
       <label>Ort<select data-placefor="${r.id}">${PLACES.map((p) => `<option${p === r.place ? " selected" : ""}>${p}</option>`).join("")}</select></label></div>
+      </details>
       <div class="tags"><button class="act warn" data-a="undo" data-id="${r.id}">Rückgängig</button></div></div>`;
   }).join("");
 }
@@ -299,6 +303,26 @@ document.addEventListener("submit", (e) => {
   learn(items.find((x) => x.id === id), { name: v, cat });
   renderRecent(); toast(`${v} gespeichert. Beim nächsten Scan erkennt die App es sofort.`);
 });
+
+/* ---------- Haltbarkeit schätzen ----------
+   Open Food Facts kennt kein Ablaufdatum (es steht nur auf der Packung).
+   Darum: übliche Haltbarkeit ab Kauf nach Produktart; korrigiert ihr einmal, merkt sich die App das pro Barcode. */
+const SHELF = [
+  [/h-milch|haltbare milch|uht/, 90], [/frischmilch|vollmilch|milch|milk/, 8], [/sahne|cream|schmand|crème fraîche|creme fraiche|saure sahne/, 14],
+  [/joghurt|yogurt|quark|skyr|pudding|dessert/, 18], [/butter/, 40], [/frischkäse|mozzarella|feta|cream cheese/, 14],
+  [/käse|cheese|gouda|emmentaler|parmesan/, 28], [/hackfleisch|hack|minced/, 1], [/hähnchen|huhn|chicken|pute|turkey|fisch|fish|lachs|salmon/, 3],
+  [/schinken|salami|wurst|aufschnitt|sausage|ham/, 10], [/fleisch|meat|steak|schnitzel/, 3], [/eier|eggs|ei/, 21],
+  [/toast|piccolini|aufback|brötchen|baguette/, 7], [/brot|bread/, 5], [/salat|lettuce|spinat|rucola|kräuter/, 4], [/beeren|berries|erdbeer/, 4],
+  [/tiefkühl|frozen|eis|ice cream/, 180], [/konserve|canned|dose/, 720], [/nudel|pasta|reis|rice|mehl|flour|zucker|sugar|müsli|cereal/, 365],
+  [/schokolade|chocolate|kekse|biscuit|chips|snack/, 180], [/saft|juice|limonade|cola|soda/, 120], [/wasser|water/, 365],
+  [/marmelade|konfitüre|jam|honig|honey|nutella|aufstrich|spread/, 300], [/ketchup|senf|mustard|mayo|soße|sauce|dressing/, 180],
+];
+function estimateDays(name, tags, cat) {
+  const hay = (String(name) + " " + (tags || []).join(" ")).toLowerCase().replace(/en:|de:/g, "");
+  if (cat === "Tiefkühl") return 180;
+  for (const [re, d] of SHELF) if (re.test(hay)) return d;
+  return CATS[cat] ? CATS[cat].d : 14;
+}
 
 /* ---------- MHD schnell eintippen ---------- */
 // Versteht: 1203 · 12.03 · 120327 · 12.03.27 · 12032027 · 03.2027 (Monat/Jahr -> letzter Tag)

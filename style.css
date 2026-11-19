@@ -95,3 +95,5 @@ nav button{position:relative}
 .shoprow.done .name{text-decoration:line-through;color:var(--muted)}
 .shopsel{grid-column:2 / span 2;width:auto;justify-self:start;padding:4px 8px;font-size:14px}
 .warnnote{color:var(--amber);font-weight:600}
+.more summary{cursor:pointer;color:var(--accent);font-size:.85rem;font-weight:600;padding:4px 0}
+.more[open]{display:grid;gap:8px}
